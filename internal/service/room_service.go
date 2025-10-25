@@ -251,6 +251,7 @@ func (s *RoomService) HandleSignal(ctx context.Context, roomID uuid.UUID, peerID
 
 		if forward.TargetID == "" {
 			s.broadcast(room, forward, peer.ID)
+			return nil, nil
 		}
 		room.Mutex.RLock()
 		targetPeer, ok := room.Peers[forward.TargetID]

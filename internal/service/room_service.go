@@ -305,6 +305,7 @@ func (s *RoomService) HandleSignal(ctx context.Context, roomID uuid.UUID, peerID
 			return nil, err
 		}
 	case "leave":
+		log.Info("type is leaving")
 		return nil, s.UnregisterPeer(ctx, roomID, peerID)
 	default:
 		return nil, fmt.Errorf("unsupported signal type: %s", message.Type)
@@ -314,11 +315,18 @@ func (s *RoomService) HandleSignal(ctx context.Context, roomID uuid.UUID, peerID
 }
 
 func (s *RoomService) ListParticipants(ctx context.Context, roomID uuid.UUID) ([]*domain.User, error) {
+	const op = "service.room.listParticipants"
+
+	log := s.log.With(
+		"op", op,
+		"room_id", roomID.String(),
+	)
+	log.Info("trying to get room")
 	room, err := s.GetRoom(ctx, roomID)
 	if err != nil {
 		return nil, err
 	}
-
+	log.Info("room getted")
 	users := make([]*domain.User, 0, len(room.Peers))
 
 	room.Mutex.RLock()
@@ -334,7 +342,7 @@ func (s *RoomService) ListParticipants(ctx context.Context, roomID uuid.UUID) ([
 		}
 		users = append(users, user)
 	}
-
+	log.Info("participants getted successufully")
 	return users, nil
 }
 

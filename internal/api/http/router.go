@@ -10,6 +10,9 @@ func SetupRouter(roomController *RoomController, userController *UserController)
 	config := cors.DefaultConfig()
 	config.AllowOrigins = []string{
 		"http://localhost:3000",
+		"http://138.124.14.255:3000",
+		"https://138.124.14.255:3000",
+		"https://138.124.14.255",
 	}
 	config.AllowCredentials = true
 	config.AllowHeaders = []string{

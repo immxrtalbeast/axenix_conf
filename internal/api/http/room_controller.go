@@ -115,6 +115,12 @@ func (c *RoomController) JoinRoom(ctx *gin.Context) {
 		return
 	}
 
+	_, err = c.rooms.GetRoom(ctx, roomID)
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "no room founded"})
+		return
+	}
+
 	displayName := ctx.Query("name")
 	if displayName == "" {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})

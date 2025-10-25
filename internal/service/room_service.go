@@ -182,7 +182,7 @@ func (s *RoomService) RegisterPeer(ctx context.Context, roomID uuid.UUID, user *
 	}
 
 	s.broadcast(room, domain.SignalMessage{
-		Type:     "peer-joined",
+		Type:     "joined",
 		Room:     room.ID.String(),
 		SenderID: peer.ID,
 		Payload: map[string]any{

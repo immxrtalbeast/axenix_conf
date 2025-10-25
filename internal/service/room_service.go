@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/immxrtalbeast/axenix_conf/internal/domain"
 	"github.com/immxrtalbeast/axenix_conf/internal/repository"
+	"github.com/immxrtalbeast/axenix_conf/lib/logger/sl"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -54,6 +55,7 @@ func (s *RoomService) CreateRoom(ctx context.Context, name string, owner uuid.UU
 
 	for {
 		room = domain.NewRoom(name, owner, lifetime)
+		s.log.Info("room created", room.ID)
 		if err := s.rooms.Create(ctx, room); err != nil {
 			if errors.Is(err, repository.ErrRoomLinkExists) {
 				continue
@@ -68,6 +70,7 @@ func (s *RoomService) CreateRoom(ctx context.Context, name string, owner uuid.UU
 
 func (s *RoomService) GetRoom(ctx context.Context, id uuid.UUID) (*domain.Room, error) {
 	room, err := s.rooms.GetByID(ctx, id)
+	s.log.Info("room getted", room)
 	if err != nil {
 		return nil, err
 	}
@@ -91,6 +94,11 @@ func (s *RoomService) GetRoomByLink(ctx context.Context, link string) (*domain.R
 }
 
 func (s *RoomService) RegisterPeer(ctx context.Context, roomID uuid.UUID, user *domain.User) (*domain.Peer, error) {
+	const op = "service.room.register.peer"
+	s.log.With(
+		slog.String("op", op),
+		slog.String("roomID", roomID.String()),
+	)
 	if user == nil {
 		return nil, errors.New("user is required")
 	}
@@ -99,6 +107,8 @@ func (s *RoomService) RegisterPeer(ctx context.Context, roomID uuid.UUID, user *
 	if err != nil {
 		return nil, err
 	}
+
+	s.log.Info("room", room)
 
 	if err := s.ensureUser(ctx, user); err != nil {
 		return nil, err
@@ -166,11 +176,12 @@ func (s *RoomService) RegisterPeer(ctx context.Context, roomID uuid.UUID, user *
 			"display_name": peer.DisplayName,
 		},
 	}, peer.ID)
-
+	s.log.Info("peer registed")
 	return peer, nil
 }
 
 func (s *RoomService) UnregisterPeer(ctx context.Context, roomID uuid.UUID, peerID string) error {
+	s.log.Info("unregistering peer")
 	room, err := s.GetRoom(ctx, roomID)
 	if err != nil {
 		return err
@@ -190,6 +201,7 @@ func (s *RoomService) UnregisterPeer(ctx context.Context, roomID uuid.UUID, peer
 	delete(room.Peers, peerID)
 
 	if err := s.rooms.Update(ctx, room); err != nil {
+		s.log.Error("err", sl.Err(err))
 		return err
 	}
 
@@ -209,7 +221,14 @@ func (s *RoomService) HandleSignal(ctx context.Context, roomID uuid.UUID, peerID
 	if message == nil {
 		return nil, errors.New("message is required")
 	}
+	s.log.Info("new signal",
+		"type", message.Type,
+		"room", message.Room,
+		"sender", message.SenderID)
 
+	if message.Payload != nil {
+		s.log.Debug("signal payload", "payload", message.Payload)
+	}
 	room, err := s.GetRoom(ctx, roomID)
 	if err != nil {
 		return nil, err

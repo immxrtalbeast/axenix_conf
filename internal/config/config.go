@@ -8,7 +8,17 @@ import (
 )
 
 type Config struct {
-	Env string `yaml:"env" env-default:"local"`
+	Env    string       `yaml:"env" env-default:"local"`
+	HTTP   HTTPConfig   `yaml:"http"`
+	WebRTC WebRTCConfig `yaml:"webrtc"`
+}
+
+type HTTPConfig struct {
+	Address string `yaml:"address" env-default:""`
+}
+
+type WebRTCConfig struct {
+	STUNServers []string `yaml:"stun_servers" env-default:""`
 }
 
 func MustLoad() *Config {
@@ -31,6 +41,8 @@ func MustLoadPath(configPath string) *Config {
 		panic("cannot read config: " + err.Error())
 	}
 
+	cfg.setDefaults()
+
 	return &cfg
 }
 
@@ -44,5 +56,18 @@ func fetchConfigPath() string {
 		res = os.Getenv("CONFIG_PATH")
 	}
 
+	if res == "" {
+		res = "config/local.yaml"
+	}
+
 	return res
+}
+
+func (c *Config) setDefaults() {
+	if c.HTTP.Address == "" {
+		c.HTTP.Address = ":8080"
+	}
+	if len(c.WebRTC.STUNServers) == 0 {
+		c.WebRTC.STUNServers = []string{"stun:stun.l.google.com:19302"}
+	}
 }

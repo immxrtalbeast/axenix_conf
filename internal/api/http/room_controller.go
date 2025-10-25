@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/immxrtalbeast/axenix_conf/internal/api/http/converter"
 	"github.com/immxrtalbeast/axenix_conf/internal/domain"
 	"github.com/immxrtalbeast/axenix_conf/internal/service"
 	"github.com/pion/webrtc/v3"
@@ -42,12 +43,12 @@ func (c *RoomController) CreateRoom(ctx *gin.Context) {
 	}
 	var req CreateRoomRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
 		return
 	}
 	owner, err := uuid.Parse(req.Owner)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid owner uuid", "details": err})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid owner uuid", "details": err.Error()})
 		return
 	}
 	lifetime := time.Duration(req.LifetimeMinute) * time.Minute
@@ -56,7 +57,7 @@ func (c *RoomController) CreateRoom(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"room": room})
+	ctx.JSON(http.StatusOK, gin.H{"room": converter.RoomToApi(room)})
 }
 
 func (c *RoomController) GetRoom(ctx *gin.Context) {
@@ -76,7 +77,7 @@ func (c *RoomController) GetRoom(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"room": room})
+	ctx.JSON(http.StatusOK, gin.H{"room": converter.RoomToApi(room)})
 }
 
 func (c *RoomController) GetRoomByLink(ctx *gin.Context) {
@@ -89,7 +90,7 @@ func (c *RoomController) GetRoomByLink(ctx *gin.Context) {
 		ctx.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"room": room})
+	ctx.JSON(http.StatusOK, gin.H{"room": converter.RoomToApi(room)})
 }
 
 func (c *RoomController) ListParticipants(ctx *gin.Context) {
@@ -107,7 +108,6 @@ func (c *RoomController) ListParticipants(ctx *gin.Context) {
 
 	ctx.JSON(http.StatusOK, gin.H{"participants": users})
 }
-
 func (c *RoomController) JoinRoom(ctx *gin.Context) {
 	roomID, err := uuid.Parse(ctx.Param("roomID"))
 	if err != nil {

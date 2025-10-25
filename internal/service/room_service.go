@@ -70,7 +70,15 @@ func (s *RoomService) CreateRoom(ctx context.Context, name string, owner uuid.UU
 
 func (s *RoomService) GetRoom(ctx context.Context, id uuid.UUID) (*domain.Room, error) {
 	room, err := s.rooms.GetByID(ctx, id)
-	s.log.Info("room getted", room)
+	s.log.Info("room retrieved",
+		"room_id", room.ID,
+		"name", room.Name,
+		"owner", room.Owner,
+		"link", room.Link,
+		"created_at", room.CreatedAt,
+		"expires_at", room.ExpiresAt,
+		"peers_count", len(room.Peers),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -95,15 +103,22 @@ func (s *RoomService) GetRoomByLink(ctx context.Context, link string) (*domain.R
 
 func (s *RoomService) RegisterPeer(ctx context.Context, roomID uuid.UUID, user *domain.User) (*domain.Peer, error) {
 	const op = "service.room.register.peer"
-	s.log.With(
+	log := s.log.With(
 		slog.String("op", op),
-		slog.String("roomID", roomID.String()),
+		slog.String("room_id", roomID.String()),
 	)
+
 	if user == nil {
 		return nil, errors.New("user is required")
 	}
 
 	room, err := s.GetRoom(ctx, roomID)
+
+	log.Info("room info",
+		"room_id", room.ID,
+		"name", room.Name,
+		"peers_count", len(room.Peers),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -176,12 +191,19 @@ func (s *RoomService) RegisterPeer(ctx context.Context, roomID uuid.UUID, user *
 			"display_name": peer.DisplayName,
 		},
 	}, peer.ID)
-	s.log.Info("peer registed")
+	log.Info("peer registered",
+		"peer_id", peer.ID,
+		"user_id", peer.UserID,
+		"display_name", peer.DisplayName,
+	)
 	return peer, nil
 }
 
 func (s *RoomService) UnregisterPeer(ctx context.Context, roomID uuid.UUID, peerID string) error {
-	s.log.Info("unregistering peer")
+	s.log.Info("unregistering peer",
+		"room_id", roomID.String(),
+		"peer_id", peerID,
+	)
 	room, err := s.GetRoom(ctx, roomID)
 	if err != nil {
 		return err
@@ -218,14 +240,20 @@ func (s *RoomService) UnregisterPeer(ctx context.Context, roomID uuid.UUID, peer
 }
 
 func (s *RoomService) HandleSignal(ctx context.Context, roomID uuid.UUID, peerID string, message *domain.SignalMessage) (*domain.SignalMessage, error) {
+	const op = "service.room.signal"
 	if message == nil {
 		return nil, errors.New("message is required")
 	}
-	s.log.Info("new signal",
+	log := s.log.With(
+		"op", op,
+		"room_id", roomID.String(),
+		"peer_id", peerID,
+	)
+
+	log.Info("new signal",
 		"type", message.Type,
 		"room", message.Room,
 		"sender", message.SenderID)
-
 	if message.Payload != nil {
 		s.log.Debug("signal payload", "payload", message.Payload)
 	}

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -28,15 +27,14 @@ type RoomService struct {
 	mu           sync.RWMutex
 }
 
-func NewRoomService(rooms repository.RoomRepository, users repository.UserRepository, config webrtc.Configuration, log *slog.Logger) *RoomService {
+func NewRoomService(rooms repository.RoomRepository, users repository.UserRepository, log *slog.Logger) *RoomService {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &RoomService{
-		rooms:        rooms,
-		users:        users,
-		webrtcConfig: config,
-		log:          log,
+		rooms: rooms,
+		users: users,
+		log:   log,
 	}
 }
 
@@ -131,47 +129,13 @@ func (s *RoomService) RegisterPeer(ctx context.Context, roomID uuid.UUID, user *
 
 	peer := domain.NewPeer(user.ID, user.Name)
 
-	conn, err := webrtc.NewPeerConnection(s.webrtcConfig)
-	if err != nil {
-		return nil, fmt.Errorf("create peer connection: %w", err)
+	existingPeers := make([]*domain.Peer, 0, len(room.Peers))
+	room.Mutex.RLock()
+	for _, p := range room.Peers {
+		existingPeers = append(existingPeers, p)
 	}
 
-	peer.Connection = conn
-
-	conn.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		switch state {
-		case webrtc.PeerConnectionStateConnected:
-			peer.SetStatus(domain.PeerStatusConnected)
-		case webrtc.PeerConnectionStateDisconnected, webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateClosed:
-			peer.SetStatus(domain.PeerStatusDisconnected)
-		default:
-			peer.SetStatus(domain.PeerStatusConnecting)
-		}
-	})
-
-	conn.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-		if candidate == nil {
-			return
-		}
-		init := candidate.ToJSON()
-		select {
-		case peer.Events <- domain.SignalMessage{
-			Type:      "ice-candidate",
-			Candidate: &init,
-			Room:      room.ID.String(),
-			SenderID:  peer.ID,
-		}:
-		default:
-			s.log.Debug("dropping candidate event", slog.String("peer", peer.ID))
-		}
-	})
-
-	conn.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		_ = receiver
-		peer.Mutex.Lock()
-		defer peer.Mutex.Unlock()
-		peer.Streams[track.ID()] = track
-	})
+	room.Mutex.RUnlock()
 
 	room.Mutex.Lock()
 	room.Peers[peer.ID] = peer
@@ -179,6 +143,19 @@ func (s *RoomService) RegisterPeer(ctx context.Context, roomID uuid.UUID, user *
 
 	if err := s.rooms.Update(ctx, room); err != nil {
 		return nil, err
+	}
+
+	for _, existing := range existingPeers {
+		peer.EnqueueEvent(domain.SignalMessage{
+			Type:     "joined",
+			Room:     room.ID.String(),
+			SenderID: existing.ID,
+			Payload: map[string]any{
+				"peer_id":      existing.ID,
+				"user_id":      existing.UserID.String(),
+				"display_name": existing.DisplayName,
+			},
+		})
 	}
 
 	s.broadcast(room, domain.SignalMessage{
@@ -212,14 +189,11 @@ func (s *RoomService) UnregisterPeer(ctx context.Context, roomID uuid.UUID, peer
 	room.Mutex.Lock()
 	defer room.Mutex.Unlock()
 
-	peer, ok := room.Peers[peerID]
+	_, ok := room.Peers[peerID]
 	if !ok {
 		return ErrPeerNotFound
 	}
 
-	if peer.Connection != nil {
-		_ = peer.Connection.Close()
-	}
 	delete(room.Peers, peerID)
 
 	if err := s.rooms.Update(ctx, room); err != nil {
@@ -270,45 +244,26 @@ func (s *RoomService) HandleSignal(ctx context.Context, roomID uuid.UUID, peerID
 	}
 
 	switch message.Type {
-	case "offer":
-		if message.SDP == nil {
-			return nil, errors.New("offer missing SDP")
+	case "offer", "answer", "ice-candidate":
+		forward := *message
+		forward.Room = room.ID.String()
+		forward.SenderID = peer.ID
+
+		if forward.TargetID == "" {
+			s.broadcast(room, forward, peer.ID)
 		}
-		if err := peer.Connection.SetRemoteDescription(*message.SDP); err != nil {
-			return nil, err
+		room.Mutex.RLock()
+		targetPeer, ok := room.Peers[forward.TargetID]
+		room.Mutex.RUnlock()
+		if !ok {
+			return nil, ErrPeerNotFound
 		}
-		answer, err := peer.Connection.CreateAnswer(nil)
-		if err != nil {
-			return nil, err
-		}
-		if err := peer.Connection.SetLocalDescription(answer); err != nil {
-			return nil, err
-		}
-		return &domain.SignalMessage{
-			Type:     "answer",
-			SDP:      &answer,
-			SenderID: peer.ID,
-			Room:     room.ID.String(),
-		}, nil
-	case "answer":
-		if message.SDP == nil {
-			return nil, errors.New("answer missing SDP")
-		}
-		if err := peer.Connection.SetRemoteDescription(*message.SDP); err != nil {
-			return nil, err
-		}
-	case "ice-candidate":
-		if message.Candidate == nil {
-			return nil, errors.New("candidate missing payload")
-		}
-		if err := peer.Connection.AddICECandidate(*message.Candidate); err != nil {
-			return nil, err
-		}
+		targetPeer.EnqueueEvent(forward)
 	case "leave":
 		log.Info("type is leaving")
 		return nil, s.UnregisterPeer(ctx, roomID, peerID)
 	default:
-		return nil, fmt.Errorf("unsupported signal type: %s", message.Type)
+		return nil, errors.New("unsupported signal type: " + message.Type)
 	}
 
 	return nil, nil

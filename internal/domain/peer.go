@@ -6,7 +6,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	"github.com/pion/webrtc/v3"
 )
 
 type PeerStatus string
@@ -25,8 +24,6 @@ type Peer struct {
 	Status      PeerStatus
 	JoinedAt    time.Time
 	LastSeen    time.Time
-	Connection  *webrtc.PeerConnection
-	Streams     map[string]*webrtc.TrackRemote
 	Mutex       sync.RWMutex
 	Socket      *websocket.Conn
 	Events      chan SignalMessage
@@ -40,7 +37,6 @@ func NewPeer(userID uuid.UUID, displayName string) *Peer {
 		Status:      PeerStatusConnecting,
 		JoinedAt:    time.Now().UTC(),
 		LastSeen:    time.Now().UTC(),
-		Streams:     make(map[string]*webrtc.TrackRemote),
 		Events:      make(chan SignalMessage, 16),
 	}
 }
@@ -49,6 +45,13 @@ func (p *Peer) Touch() {
 	p.Mutex.Lock()
 	defer p.Mutex.Unlock()
 	p.LastSeen = time.Now().UTC()
+}
+
+func (p *Peer) EnqueueEvent(event SignalMessage) {
+	select {
+	case p.Events <- event:
+	default:
+	}
 }
 
 func (p *Peer) SetStatus(status PeerStatus) {

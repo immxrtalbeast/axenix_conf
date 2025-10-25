@@ -12,7 +12,6 @@ import (
 	"github.com/immxrtalbeast/axenix_conf/internal/api/http/converter"
 	"github.com/immxrtalbeast/axenix_conf/internal/domain"
 	"github.com/immxrtalbeast/axenix_conf/internal/service"
-	"github.com/pion/webrtc/v3"
 )
 
 type RoomController struct {
@@ -187,9 +186,6 @@ func (c *RoomController) JoinRoom(ctx *gin.Context) {
 		}
 
 		if resp != nil {
-			if resp.SDP != nil {
-				resp.SDP.Type = webrtc.SDPTypeAnswer
-			}
 			if err := conn.WriteJSON(resp); err != nil {
 				_ = c.rooms.UnregisterPeer(context.Background(), roomID, peer.ID)
 				conn.Close()

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pion/webrtc/v3"
 )
 
 const linkLength = 12
@@ -20,7 +19,6 @@ type Room struct {
 	Owner     uuid.UUID
 	Link      string
 	Peers     map[string]*Peer
-	Tracks    map[string]*webrtc.TrackLocalStaticRTP
 	CreatedAt time.Time
 	ExpiresAt time.Time
 }
@@ -35,7 +33,6 @@ func NewRoom(name string, owner uuid.UUID, lifetime time.Duration) *Room {
 		Owner:     owner,
 		Link:      generateLink(),
 		Peers:     make(map[string]*Peer),
-		Tracks:    make(map[string]*webrtc.TrackLocalStaticRTP),
 		CreatedAt: now,
 	}
 

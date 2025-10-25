@@ -10,7 +10,6 @@ import (
 	"github.com/immxrtalbeast/axenix_conf/internal/service"
 	"github.com/immxrtalbeast/axenix_conf/lib/logger/slogpretty"
 	"github.com/joho/godotenv"
-	"github.com/pion/webrtc/v3"
 )
 
 func main() {
@@ -19,16 +18,10 @@ func main() {
 	cfg := config.MustLoad()
 	log := setupLogger(cfg.Env)
 
-	rtcConfig := webrtc.Configuration{
-		ICEServers: []webrtc.ICEServer{
-			{URLs: cfg.WebRTC.STUNServers},
-		},
-	}
-
 	roomRepo := repository.NewInMemoryRoomRepository()
 	userRepo := repository.NewInMemoryUserRepository()
 
-	roomService := service.NewRoomService(roomRepo, userRepo, rtcConfig, log)
+	roomService := service.NewRoomService(roomRepo, userRepo, log)
 	userService := service.NewUserService(userRepo, log)
 
 	roomController := httpapi.NewRoomController(roomService, userService)

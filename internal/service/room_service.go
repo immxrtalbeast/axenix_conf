@@ -21,6 +21,14 @@ var (
 )
 
 const maxChatMessageLength = 4000
+const maxChatSenderLength = 255
+
+type chatPayloadData struct {
+	message   string
+	sender    string
+	id        uuid.UUID
+	timestamp time.Time
+}
 
 type RoomService struct {
 	rooms       repository.RoomRepository
@@ -278,12 +286,22 @@ func (s *RoomService) HandleSignal(ctx context.Context, roomID uuid.UUID, peerID
 		}
 		targetPeer.EnqueueEvent(forward)
 	case "chat":
-		content, err := validateChatPayload(message.Payload)
+		payloadData, err := validateChatPayload(message.Payload)
 		if err != nil {
 			return nil, err
 		}
 
-		chatMsg := domain.NewChatMessage(room.ID, peer, content)
+		chatMsg := domain.NewChatMessage(room.ID, peer, payloadData.message)
+		if payloadData.id != uuid.Nil {
+			chatMsg.ID = payloadData.id
+		}
+		if payloadData.sender != "" {
+			chatMsg.DisplayName = payloadData.sender
+		}
+		if !payloadData.timestamp.IsZero() {
+			chatMsg.CreatedAt = payloadData.timestamp.UTC()
+		}
+
 		if err := s.rooms.SaveChatMessage(ctx, chatMsg); err != nil {
 			log.Error("failed to save chat message", sl.Err(err))
 			return nil, err
@@ -294,12 +312,10 @@ func (s *RoomService) HandleSignal(ctx context.Context, roomID uuid.UUID, peerID
 			Room:     room.ID.String(),
 			SenderID: peer.ID,
 			Payload: map[string]any{
-				"message_id":   chatMsg.ID.String(),
-				"peer_id":      chatMsg.PeerID,
-				"user_id":      chatMsg.UserID.String(),
-				"display_name": chatMsg.DisplayName,
-				"content":      chatMsg.Content,
-				"created_at":   chatMsg.CreatedAt,
+				"id":        chatMsg.ID.String(),
+				"sender":    chatMsg.DisplayName,
+				"message":   chatMsg.Content,
+				"timestamp": chatMsg.CreatedAt.UTC().Format(time.RFC3339Nano),
 			},
 		}
 
@@ -476,29 +492,78 @@ func (s *RoomService) logRoom(room *domain.Room) {
 	)
 }
 
-func validateChatPayload(payload map[string]any) (string, error) {
+func validateChatPayload(payload map[string]any) (*chatPayloadData, error) {
 	if payload == nil {
-		return "", errors.New("chat payload is required")
+		return nil, errors.New("chat payload is required")
 	}
 
-	rawContent, ok := payload["content"]
+	rawMessage, ok := payload["message"]
 	if !ok {
-		return "", errors.New("chat payload content is required")
+		return nil, errors.New("chat payload message is required")
 	}
 
-	content, ok := rawContent.(string)
+	message, ok := rawMessage.(string)
 	if !ok {
-		return "", errors.New("chat payload content must be string")
+		return nil, errors.New("chat payload message must be string")
 	}
 
-	trimmed := strings.TrimSpace(content)
-	if trimmed == "" {
-		return "", errors.New("chat message cannot be empty")
+	trimmedMsg := strings.TrimSpace(message)
+	if trimmedMsg == "" {
+		return nil, errors.New("chat message cannot be empty")
 	}
 
-	if utf8.RuneCountInString(trimmed) > maxChatMessageLength {
-		return "", errors.New("chat message is too long")
+	if utf8.RuneCountInString(trimmedMsg) > maxChatMessageLength {
+		return nil, errors.New("chat message is too long")
 	}
 
-	return trimmed, nil
+	result := &chatPayloadData{
+		message: trimmedMsg,
+	}
+
+	if rawSender, ok := payload["sender"]; ok && rawSender != nil {
+		senderStr, ok := rawSender.(string)
+		if !ok {
+			return nil, errors.New("chat payload sender must be string")
+		}
+		trimmedSender := strings.TrimSpace(senderStr)
+		if utf8.RuneCountInString(trimmedSender) > maxChatSenderLength {
+			return nil, errors.New("chat sender is too long")
+		}
+		result.sender = trimmedSender
+	}
+
+	if rawID, ok := payload["id"]; ok && rawID != nil {
+		idStr, ok := rawID.(string)
+		if !ok {
+			return nil, errors.New("chat payload id must be string")
+		}
+		idStr = strings.TrimSpace(idStr)
+		if idStr != "" {
+			parsed, err := uuid.Parse(idStr)
+			if err != nil {
+				return nil, errors.New("chat payload id must be valid uuid")
+			}
+			result.id = parsed
+		}
+	}
+
+	if rawTimestamp, ok := payload["timestamp"]; ok && rawTimestamp != nil {
+		tsStr, ok := rawTimestamp.(string)
+		if !ok {
+			return nil, errors.New("chat payload timestamp must be string")
+		}
+		tsStr = strings.TrimSpace(tsStr)
+		if tsStr != "" {
+			parsed, err := time.Parse(time.RFC3339Nano, tsStr)
+			if err != nil {
+				parsed, err = time.Parse(time.RFC3339, tsStr)
+				if err != nil {
+					return nil, errors.New("chat payload timestamp must be RFC3339 formatted")
+				}
+			}
+			result.timestamp = parsed.UTC()
+		}
+	}
+
+	return result, nil
 }

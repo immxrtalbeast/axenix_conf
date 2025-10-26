@@ -19,10 +19,11 @@ var (
 )
 
 type RoomService struct {
-	rooms repository.RoomRepository
-	users repository.UserRepository
-	log   *slog.Logger
-	mu    sync.RWMutex
+	rooms       repository.RoomRepository
+	users       repository.UserRepository
+	log         *slog.Logger
+	mu          sync.RWMutex
+	activeRooms map[uuid.UUID]*domain.Room
 }
 
 func NewRoomService(rooms repository.RoomRepository, users repository.UserRepository, log *slog.Logger) *RoomService {
@@ -30,9 +31,10 @@ func NewRoomService(rooms repository.RoomRepository, users repository.UserReposi
 		log = slog.Default()
 	}
 	return &RoomService{
-		rooms: rooms,
-		users: users,
-		log:   log,
+		rooms:       rooms,
+		users:       users,
+		log:         log,
+		activeRooms: make(map[uuid.UUID]*domain.Room),
 	}
 }
 
@@ -44,55 +46,69 @@ func (s *RoomService) CreateRoom(ctx context.Context, name string, owner uuid.UU
 		return nil, errors.New("owner is required")
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	var room *domain.Room
-
 	for {
-		room = domain.NewRoom(name, owner, lifetime)
-		s.log.Info("room created", room.ID)
+		room := domain.NewRoom(name, owner, lifetime)
+		s.log.Info("room created", "room_id", room.ID.String())
 		if err := s.rooms.Create(ctx, room); err != nil {
 			if errors.Is(err, repository.ErrRoomLinkExists) {
 				continue
 			}
 			return nil, err
 		}
-		break
-	}
 
-	return room, nil
+		s.mu.Lock()
+		s.activeRooms[room.ID] = room
+		s.mu.Unlock()
+
+		return room, nil
+	}
 }
 
 func (s *RoomService) GetRoom(ctx context.Context, id uuid.UUID) (*domain.Room, error) {
-	room, err := s.rooms.GetByID(ctx, id)
+	if room := s.getActiveRoom(id); room != nil {
+		if room.IsExpired() {
+			s.removeActiveRoom(id)
+			return nil, ErrRoomExpired
+		}
+		s.logRoom(room)
+		return room, nil
+	}
+
+	roomFromDB, err := s.rooms.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	s.log.Info("room retrieved",
-		"room_id", room.ID,
-		"name", room.Name,
-		"owner", room.Owner,
-		"link", room.Link,
-		"created_at", room.CreatedAt,
-		"expires_at", room.ExpiresAt,
-		"peers_count", len(room.Peers),
-	)
+
+	room := s.activateRoom(roomFromDB)
 	if room.IsExpired() {
+		s.removeActiveRoom(room.ID)
 		return nil, ErrRoomExpired
 	}
+
+	s.logRoom(room)
 	return room, nil
 }
 
 func (s *RoomService) GetRoomByLink(ctx context.Context, link string) (*domain.Room, error) {
-	room, err := s.rooms.GetByLink(ctx, link)
+	if room := s.getActiveRoomByLink(link); room != nil {
+		if room.IsExpired() {
+			s.removeActiveRoom(room.ID)
+			return nil, ErrRoomExpired
+		}
+		return room, nil
+	}
+
+	roomFromDB, err := s.rooms.GetByLink(ctx, link)
 	if err != nil {
 		return nil, err
 	}
 
+	room := s.activateRoom(roomFromDB)
 	if room.IsExpired() {
+		s.removeActiveRoom(room.ID)
 		return nil, ErrRoomExpired
 	}
+
 	return room, nil
 }
 
@@ -108,7 +124,6 @@ func (s *RoomService) RegisterPeer(ctx context.Context, roomID uuid.UUID, user *
 	}
 
 	room, err := s.GetRoom(ctx, roomID)
-
 	if err != nil {
 		log.Info("err", sl.Err(err))
 		return nil, err
@@ -132,7 +147,6 @@ func (s *RoomService) RegisterPeer(ctx context.Context, roomID uuid.UUID, user *
 	for _, p := range room.Peers {
 		existingPeers = append(existingPeers, p)
 	}
-
 	room.Mutex.RUnlock()
 
 	room.Mutex.Lock()
@@ -347,4 +361,69 @@ func (s *RoomService) broadcast(room *domain.Room, msg domain.SignalMessage, exc
 			s.log.Debug("dropping broadcast event", slog.String("peer", peer.ID), slog.String("type", msg.Type))
 		}
 	}
+}
+
+func (s *RoomService) getActiveRoom(id uuid.UUID) *domain.Room {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.activeRooms[id]
+}
+
+func (s *RoomService) getActiveRoomByLink(link string) *domain.Room {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, room := range s.activeRooms {
+		if room.Link == link {
+			return room
+		}
+	}
+	return nil
+}
+
+func (s *RoomService) removeActiveRoom(id uuid.UUID) {
+	s.mu.Lock()
+	delete(s.activeRooms, id)
+	s.mu.Unlock()
+}
+
+func (s *RoomService) activateRoom(room *domain.Room) *domain.Room {
+	if room == nil {
+		return nil
+	}
+
+	if room.Peers == nil {
+		room.Peers = make(map[string]*domain.Peer)
+	} else {
+		for _, peer := range room.Peers {
+			if peer == nil {
+				continue
+			}
+			peer.Events = make(chan domain.SignalMessage, 16)
+			if peer.Status == "" {
+				peer.Status = domain.PeerStatusDisconnected
+			}
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if existing := s.activeRooms[room.ID]; existing != nil {
+		return existing
+	}
+
+	s.activeRooms[room.ID] = room
+	return room
+}
+
+func (s *RoomService) logRoom(room *domain.Room) {
+	s.log.Info("room retrieved",
+		"room_id", room.ID,
+		"name", room.Name,
+		"owner", room.Owner,
+		"link", room.Link,
+		"created_at", room.CreatedAt,
+		"expires_at", room.ExpiresAt,
+		"peers_count", len(room.Peers),
+	)
 }

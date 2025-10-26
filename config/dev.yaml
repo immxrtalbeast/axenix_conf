@@ -1,1 +1,4 @@
 env: "dev"
+database:
+  dsn: "postgres://postgres:postgres@localhost:5432/axenix_conf?sslmode=disable"
+  auto_migrate: true

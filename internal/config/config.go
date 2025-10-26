@@ -8,9 +8,10 @@ import (
 )
 
 type Config struct {
-	Env    string       `yaml:"env" env-default:"local"`
-	HTTP   HTTPConfig   `yaml:"http"`
-	WebRTC WebRTCConfig `yaml:"webrtc"`
+	Env      string         `yaml:"env" env-default:"local"`
+	HTTP     HTTPConfig     `yaml:"http"`
+	WebRTC   WebRTCConfig   `yaml:"webrtc"`
+	Database DatabaseConfig `yaml:"database"`
 }
 
 type HTTPConfig struct {
@@ -19,6 +20,11 @@ type HTTPConfig struct {
 
 type WebRTCConfig struct {
 	STUNServers []string `yaml:"stun_servers" env-default:""`
+}
+
+type DatabaseConfig struct {
+	DSN         string `yaml:"dsn" env:"DATABASE_DSN"`
+	AutoMigrate *bool  `yaml:"auto_migrate" env:"DATABASE_AUTO_MIGRATE"`
 }
 
 func MustLoad() *Config {
@@ -69,5 +75,9 @@ func (c *Config) setDefaults() {
 	}
 	if len(c.WebRTC.STUNServers) == 0 {
 		c.WebRTC.STUNServers = []string{"stun:stun.l.google.com:19302"}
+	}
+	if c.Database.AutoMigrate == nil {
+		def := true
+		c.Database.AutoMigrate = &def
 	}
 }

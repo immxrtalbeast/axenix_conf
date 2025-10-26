@@ -1,3 +1,0 @@
-package model
-
-//модели бд

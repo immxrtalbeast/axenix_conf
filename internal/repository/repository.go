@@ -14,6 +14,8 @@ type RoomRepository interface {
 	Update(ctx context.Context, room *domain.Room) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	List(ctx context.Context) ([]*domain.Room, error)
+	SaveChatMessage(ctx context.Context, message *domain.ChatMessage) error
+	ListChatMessages(ctx context.Context, roomID uuid.UUID, limit int) ([]*domain.ChatMessage, error)
 }
 
 type UserRepository interface {

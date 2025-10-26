@@ -97,7 +97,7 @@ func connectDatabase(cfg config.DatabaseConfig) (*gorm.DB, error) {
 	}
 
 	if cfg.AutoMigrate == nil || *cfg.AutoMigrate {
-		if err := db.AutoMigrate(&model.Room{}, &model.Peer{}, &model.User{}); err != nil {
+		if err := db.AutoMigrate(&model.Room{}, &model.Peer{}, &model.User{}, &model.ChatMessage{}); err != nil {
 			return nil, err
 		}
 	}

@@ -95,12 +95,7 @@ func connectDatabase(cfg config.DatabaseConfig) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	if cfg.AutoMigrate == nil || *cfg.AutoMigrate {
-		if err := db.AutoMigrate(&model.Room{}, &model.Peer{}, &model.User{}); err != nil {
-			return nil, err
-		}
-	}
+	db.AutoMigrate(&model.Room{}, &model.Peer{}, &model.User{})
 
 	sqlDB, err := db.DB()
 	if err != nil {

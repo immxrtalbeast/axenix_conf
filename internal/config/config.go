@@ -23,8 +23,7 @@ type WebRTCConfig struct {
 }
 
 type DatabaseConfig struct {
-	DSN         string `yaml:"dsn" env:"DATABASE_DSN"`
-	AutoMigrate *bool  `yaml:"auto_migrate" env:"DATABASE_AUTO_MIGRATE"`
+	DSN string `yaml:"dsn" env:"DATABASE_DSN"`
 }
 
 func MustLoad() *Config {
@@ -76,8 +75,5 @@ func (c *Config) setDefaults() {
 	if len(c.WebRTC.STUNServers) == 0 {
 		c.WebRTC.STUNServers = []string{"stun:stun.l.google.com:19302"}
 	}
-	if c.Database.AutoMigrate == nil {
-		def := true
-		c.Database.AutoMigrate = &def
-	}
+
 }

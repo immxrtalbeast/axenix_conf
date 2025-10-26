@@ -212,14 +212,26 @@ func (s *RoomService) UnregisterPeer(ctx context.Context, roomID uuid.UUID, peer
 	}
 
 	room.Mutex.Lock()
-	defer room.Mutex.Unlock()
-
-	_, ok := room.Peers[peerID]
+	peer, ok := room.Peers[peerID]
 	if !ok {
+		room.Mutex.Unlock()
 		return ErrPeerNotFound
 	}
 
 	delete(room.Peers, peerID)
+	roomEmpty := len(room.Peers) == 0
+	room.Mutex.Unlock()
+
+	if peer != nil {
+		peer.SetStatus(domain.PeerStatusDisconnected)
+		if peer.Events != nil {
+			close(peer.Events)
+		}
+		if peer.Socket != nil {
+			peer.Socket.Close()
+			peer.Socket = nil
+		}
+	}
 
 	if err := s.rooms.Update(ctx, room); err != nil {
 		s.log.Error("err", sl.Err(err))
@@ -234,6 +246,10 @@ func (s *RoomService) UnregisterPeer(ctx context.Context, roomID uuid.UUID, peer
 			"peer_id": peerID,
 		},
 	}, peerID)
+
+	if roomEmpty {
+		s.removeActiveRoom(room.ID)
+	}
 
 	return nil
 }

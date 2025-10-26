@@ -160,6 +160,46 @@ func (r *PostgresRoomRepository) List(ctx context.Context) ([]*domain.Room, erro
 	return result, nil
 }
 
+func (r *PostgresRoomRepository) SaveChatMessage(ctx context.Context, message *domain.ChatMessage) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if message == nil {
+		return errors.New("chat message is nil")
+	}
+
+	modelMsg := toModelChatMessage(message)
+	return r.db.WithContext(ctx).Create(modelMsg).Error
+}
+
+func (r *PostgresRoomRepository) ListChatMessages(ctx context.Context, roomID uuid.UUID, limit int) ([]*domain.ChatMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if roomID == uuid.Nil {
+		return nil, errors.New("room id is required")
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+
+	var items []model.ChatMessage
+	err := r.db.WithContext(ctx).
+		Where("room_id = ?", roomID).
+		Order("created_at ASC").
+		Limit(limit).
+		Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]*domain.ChatMessage, 0, len(items))
+	for i := range items {
+		result = append(result, toDomainChatMessage(&items[i]))
+	}
+	return result, nil
+}
+
 type PostgresUserRepository struct {
 	db *gorm.DB
 }
@@ -319,6 +359,36 @@ func toDomainRoom(room *model.Room) *domain.Room {
 		Peers:     peers,
 		CreatedAt: room.CreatedAt.UTC(),
 		ExpiresAt: expiresAt,
+	}
+}
+
+func toModelChatMessage(message *domain.ChatMessage) *model.ChatMessage {
+	if message == nil {
+		return nil
+	}
+	return &model.ChatMessage{
+		ID:          message.ID,
+		RoomID:      message.RoomID,
+		UserID:      message.UserID,
+		PeerID:      message.PeerID,
+		DisplayName: message.DisplayName,
+		Content:     message.Content,
+		CreatedAt:   message.CreatedAt.UTC(),
+	}
+}
+
+func toDomainChatMessage(message *model.ChatMessage) *domain.ChatMessage {
+	if message == nil {
+		return nil
+	}
+	return &domain.ChatMessage{
+		ID:          message.ID,
+		RoomID:      message.RoomID,
+		UserID:      message.UserID,
+		PeerID:      message.PeerID,
+		DisplayName: message.DisplayName,
+		Content:     message.Content,
+		CreatedAt:   message.CreatedAt.UTC(),
 	}
 }
 

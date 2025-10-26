@@ -14,6 +14,7 @@ type Room struct {
 	CreatedAt time.Time  `gorm:"not null"`
 	ExpiresAt *time.Time `gorm:"index"`
 	Peers     []Peer     `gorm:"constraint:OnDelete:CASCADE"`
+	Messages  []ChatMessage
 }
 
 type Peer struct {
@@ -35,4 +36,14 @@ type User struct {
 	IsGuest   bool      `gorm:"not null"`
 	CreatedAt time.Time `gorm:"not null"`
 	UpdatedAt time.Time `gorm:"not null"`
+}
+
+type ChatMessage struct {
+	ID          uuid.UUID `gorm:"type:uuid;primaryKey"`
+	RoomID      uuid.UUID `gorm:"type:uuid;index;not null"`
+	UserID      uuid.UUID `gorm:"type:uuid;index"`
+	PeerID      string    `gorm:"size:64;index"`
+	DisplayName string    `gorm:"size:255;not null"`
+	Content     string    `gorm:"type:text;not null"`
+	CreatedAt   time.Time `gorm:"not null;index"`
 }

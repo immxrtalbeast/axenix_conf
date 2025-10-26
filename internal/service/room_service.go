@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/immxrtalbeast/axenix_conf/internal/domain"
@@ -17,6 +19,8 @@ var (
 	ErrRoomExpired  = errors.New("room expired")
 	ErrPeerNotFound = errors.New("peer not found")
 )
+
+const maxChatMessageLength = 4000
 
 type RoomService struct {
 	rooms       repository.RoomRepository
@@ -273,6 +277,33 @@ func (s *RoomService) HandleSignal(ctx context.Context, roomID uuid.UUID, peerID
 			return nil, ErrPeerNotFound
 		}
 		targetPeer.EnqueueEvent(forward)
+	case "chat":
+		content, err := validateChatPayload(message.Payload)
+		if err != nil {
+			return nil, err
+		}
+
+		chatMsg := domain.NewChatMessage(room.ID, peer, content)
+		if err := s.rooms.SaveChatMessage(ctx, chatMsg); err != nil {
+			log.Error("failed to save chat message", sl.Err(err))
+			return nil, err
+		}
+
+		event := domain.SignalMessage{
+			Type:     "chat",
+			Room:     room.ID.String(),
+			SenderID: peer.ID,
+			Payload: map[string]any{
+				"message_id":   chatMsg.ID.String(),
+				"peer_id":      chatMsg.PeerID,
+				"user_id":      chatMsg.UserID.String(),
+				"display_name": chatMsg.DisplayName,
+				"content":      chatMsg.Content,
+				"created_at":   chatMsg.CreatedAt,
+			},
+		}
+
+		s.broadcastAll(room, event)
 	case "leave":
 		log.Info("type is leaving")
 		return nil, s.UnregisterPeer(ctx, roomID, peerID)
@@ -363,6 +394,23 @@ func (s *RoomService) broadcast(room *domain.Room, msg domain.SignalMessage, exc
 	}
 }
 
+func (s *RoomService) broadcastAll(room *domain.Room, msg domain.SignalMessage) {
+	room.Mutex.RLock()
+	peers := make([]*domain.Peer, 0, len(room.Peers))
+	for _, peer := range room.Peers {
+		peers = append(peers, peer)
+	}
+	room.Mutex.RUnlock()
+
+	for _, peer := range peers {
+		select {
+		case peer.Events <- msg:
+		default:
+			s.log.Debug("dropping broadcast event", slog.String("peer", peer.ID), slog.String("type", msg.Type))
+		}
+	}
+}
+
 func (s *RoomService) getActiveRoom(id uuid.UUID) *domain.Room {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -426,4 +474,31 @@ func (s *RoomService) logRoom(room *domain.Room) {
 		"expires_at", room.ExpiresAt,
 		"peers_count", len(room.Peers),
 	)
+}
+
+func validateChatPayload(payload map[string]any) (string, error) {
+	if payload == nil {
+		return "", errors.New("chat payload is required")
+	}
+
+	rawContent, ok := payload["content"]
+	if !ok {
+		return "", errors.New("chat payload content is required")
+	}
+
+	content, ok := rawContent.(string)
+	if !ok {
+		return "", errors.New("chat payload content must be string")
+	}
+
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return "", errors.New("chat message cannot be empty")
+	}
+
+	if utf8.RuneCountInString(trimmed) > maxChatMessageLength {
+		return "", errors.New("chat message is too long")
+	}
+
+	return trimmed, nil
 }

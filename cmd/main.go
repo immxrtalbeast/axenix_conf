@@ -24,7 +24,7 @@ func main() {
 	roomService := service.NewRoomService(roomRepo, userRepo, log)
 	userService := service.NewUserService(userRepo, log)
 
-	roomController := httpapi.NewRoomController(roomService, userService)
+	roomController := httpapi.NewRoomController(roomService, userService, log)
 	userController := httpapi.NewUserController(userService)
 
 	router := httpapi.SetupRouter(roomController, userController)

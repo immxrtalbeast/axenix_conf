@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -18,12 +19,14 @@ type RoomController struct {
 	rooms    service.RoomInteractor
 	users    service.UserInteractor
 	upgrader websocket.Upgrader
+	log      *slog.Logger
 }
 
-func NewRoomController(rooms service.RoomInteractor, users service.UserInteractor) *RoomController {
+func NewRoomController(rooms service.RoomInteractor, users service.UserInteractor, log *slog.Logger) *RoomController {
 	return &RoomController{
 		rooms: rooms,
 		users: users,
+		log:   log,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -150,8 +153,9 @@ func (c *RoomController) JoinRoom(ctx *gin.Context) {
 		return
 	}
 
-	peer, err := c.rooms.RegisterPeer(context.Background(), roomID, user)
+	peer, err := c.rooms.RegisterPeer(ctx.Request.Context(), roomID, user)
 	if err != nil {
+		c.log.Info("failed to register peer", "error", err, "room_id", roomID, "user_id", user.ID)
 		conn.WriteJSON(gin.H{"error": err.Error()})
 		conn.Close()
 		return
@@ -174,12 +178,12 @@ func (c *RoomController) JoinRoom(ctx *gin.Context) {
 	for {
 		var msg domain.SignalMessage
 		if err := conn.ReadJSON(&msg); err != nil {
-			_ = c.rooms.UnregisterPeer(context.Background(), roomID, peer.ID)
+			_ = c.rooms.UnregisterPeer(ctx.Request.Context(), roomID, peer.ID)
 			conn.Close()
 			return
 		}
 
-		resp, err := c.rooms.HandleSignal(context.Background(), roomID, peer.ID, &msg)
+		resp, err := c.rooms.HandleSignal(ctx.Request.Context(), roomID, peer.ID, &msg)
 		if err != nil {
 			conn.WriteJSON(gin.H{"error": err.Error()})
 			continue

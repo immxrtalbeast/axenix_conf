@@ -59,12 +59,3 @@ func (p *Peer) SetStatus(status PeerStatus) {
 	defer p.Mutex.Unlock()
 	p.Status = status
 }
-
-// type PeerInterface interface {
-// 	SetSocket(ws_conn *websocket.Conn)
-// 	AddRemoteTrack(track *webrtc.TrackRemote)
-// 	RemoveRemoteTrack(track *webrtc.TrackRemote)
-// 	SetPeerConnection(conn *webrtc.PeerConnection)
-// 	ReactOnOffer(offer webrtc.SessionDescription)
-// 	ReactOnAnswer(answer_str string)
-// }

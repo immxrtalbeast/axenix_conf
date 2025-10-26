@@ -11,7 +11,6 @@ import (
 	"github.com/immxrtalbeast/axenix_conf/internal/domain"
 	"github.com/immxrtalbeast/axenix_conf/internal/repository"
 	"github.com/immxrtalbeast/axenix_conf/lib/logger/sl"
-	"github.com/pion/webrtc/v3"
 )
 
 var (
@@ -20,11 +19,10 @@ var (
 )
 
 type RoomService struct {
-	rooms        repository.RoomRepository
-	users        repository.UserRepository
-	webrtcConfig webrtc.Configuration
-	log          *slog.Logger
-	mu           sync.RWMutex
+	rooms repository.RoomRepository
+	users repository.UserRepository
+	log   *slog.Logger
+	mu    sync.RWMutex
 }
 
 func NewRoomService(rooms repository.RoomRepository, users repository.UserRepository, log *slog.Logger) *RoomService {
@@ -68,6 +66,9 @@ func (s *RoomService) CreateRoom(ctx context.Context, name string, owner uuid.UU
 
 func (s *RoomService) GetRoom(ctx context.Context, id uuid.UUID) (*domain.Room, error) {
 	room, err := s.rooms.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
 	s.log.Info("room retrieved",
 		"room_id", room.ID,
 		"name", room.Name,
@@ -77,10 +78,6 @@ func (s *RoomService) GetRoom(ctx context.Context, id uuid.UUID) (*domain.Room, 
 		"expires_at", room.ExpiresAt,
 		"peers_count", len(room.Peers),
 	)
-	if err != nil {
-		return nil, err
-	}
-
 	if room.IsExpired() {
 		return nil, ErrRoomExpired
 	}
@@ -112,18 +109,19 @@ func (s *RoomService) RegisterPeer(ctx context.Context, roomID uuid.UUID, user *
 
 	room, err := s.GetRoom(ctx, roomID)
 
+	if err != nil {
+		log.Info("err", sl.Err(err))
+		return nil, err
+	}
+
 	log.Info("room info",
 		"room_id", room.ID,
 		"name", room.Name,
 		"peers_count", len(room.Peers),
 	)
-	if err != nil {
-		return nil, err
-	}
-
-	s.log.Info("room", room)
 
 	if err := s.ensureUser(ctx, user); err != nil {
+		log.Info("ensure user failed", "details", sl.Err(err))
 		return nil, err
 	}
 
@@ -142,6 +140,7 @@ func (s *RoomService) RegisterPeer(ctx context.Context, roomID uuid.UUID, user *
 	room.Mutex.Unlock()
 
 	if err := s.rooms.Update(ctx, room); err != nil {
+		log.Info("failed to update", "details", sl.Err(err))
 		return nil, err
 	}
 
@@ -303,6 +302,9 @@ func (s *RoomService) ListParticipants(ctx context.Context, roomID uuid.UUID) ([
 }
 
 func (s *RoomService) ensureUser(ctx context.Context, user *domain.User) error {
+	const op = "service.room.ensureUser"
+	log := s.log.With(slog.String("op", op), slog.String("user_id", user.ID.String()))
+
 	if user.ID == uuid.Nil {
 		user.ID = uuid.New()
 	}
@@ -311,13 +313,18 @@ func (s *RoomService) ensureUser(ctx context.Context, user *domain.User) error {
 	}
 	user.UpdatedAt = time.Now().UTC()
 
+	log.Info("checking if user exists")
+
 	_, err := s.users.GetByID(ctx, user.ID)
 	if err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
+			log.Info("user not found, creating new one")
 			return s.users.Create(ctx, user)
 		}
+		log.Error("error getting user", "error", err)
 		return err
 	}
+	log.Info("user exists, updating")
 
 	return s.users.Update(ctx, user)
 }
